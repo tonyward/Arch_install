@@ -54,18 +54,11 @@ def parse_config(config_path):
             exit()
         config_dict[setting] = config_file["Install.Config"][setting]
     
-    pacman_sects = []
-    for sect in sections:
-        if re.match("Pacman.*", sect):
-            pacman_sects.append(sect)
-    pacman_pkgs  = [] 
-    for sect in pacman_sects:
-        [pacman_pkgs.append(key) for key in config_file[sect]]
-    if not any(pacman_pkgs):
+    if not "Pacman.Pkgs" in sections:
         log("[!] No installation packages in {}".format(config_path))
         exit()
-    config_dict["pacman_pkgs"] = " ".join(pacman_pkgs)
-    
+    config_dict["pacman_pkgs"] = " ".join([pkg for pkg in config_file["Pacman.Pkgs"]])
+
     # TODO add yay package parsing
 
     return config_dict

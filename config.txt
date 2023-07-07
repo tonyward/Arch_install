@@ -1,4 +1,5 @@
-[Pacman.Base]
+[Pacman.Pkgs]
+# Base pkgs
 base
 base-devel
 linux
@@ -7,10 +8,10 @@ lvm2
 grub
 efibootmgr
 
-[Pacman.Intel]
+# Intel Pkgs
 intel-ucode
 
-[Pacman.Util]
+# Util Pkgs
 vim
 networkmanager
 git
@@ -19,7 +20,7 @@ man
 zsh
 pavucontrol
 
-[Pacman.Disp]
+# Disp pkgs
 i3-gaps
 lightdm
 lightdm-gtk-greeter
@@ -28,7 +29,7 @@ arandr
 picom
 feh
 
-[Pacman.User]
+# User pkgs
 firefox
 kitty
 neofetch
