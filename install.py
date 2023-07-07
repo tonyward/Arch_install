@@ -17,13 +17,18 @@
 #!/usr/bin/python
 from urllib import request
 from install_util import *
+from configparser import ConfigParser
 import os
 import subprocess
 import re
 import time
 import getpass
 
+# Constants for loading and validating install config
 CONF_FILE = "config.txt"
+CONFIG_HEADERS = {"Pacman.Pkgs", "Install.Config"}
+INSTALL_CONFIG_KEYS = {"luks_name", "tz.region", "tz.city", "hostname", 
+                       "mount_path", "sudo_user"}
 
 # Positions of useful information from lsblk command
 # lsblk output: <NAME>  <MAJ:MIN>   <RM>    <SIZE>  <RO>    <TYPE>    <MOUNTPOINTS>
@@ -35,9 +40,6 @@ TYPE_INDEX = 5
 # Format position is for efi partition size
 # sfdisk stdin - 1 line per partition <start>, <size>, <type> - blank is default, U is efi 
 SFDISK_PART = ", {}, U\n,,"
-
-# Standard hooks, plus encrypt and lvm2 for booting encrypted lvm partition
-INITRAM_HOOKS = "HOOKS=(base udev autodetect keyboard keymap consolefont modconf block encrypt lvm2 filesystems fsck)"
 
 # Repo to install yay
 YAY_REPO = "https://aur.archlinux.org/yay.git"
@@ -77,58 +79,91 @@ def main():
     install_grub(luks_partition)
     enable_services()
 
-def select_disk():
-    # Get a list of all avaliable disks 
-    proc = execute("lsblk -p")
-    result = proc.stdout
+class Installer:
+    """Holds installation config and executes discrete installation steps"""
+    def __init__(self, config_path):
+        """Read and validate config from provided file"""
+        if not os.path.isfile(config_path):
+            raise Exception("{} does not exist".format(config_path))
 
-    disks = []
-    diskSizes = []
-    for line in result.splitlines():
-        line = line.split()
-        if line[TYPE_INDEX] == "disk":
-            disks.append(line[NAME_INDEX])
-            diskSizes.append(line[SIZE_INDEX])
+        self.config = ConfigParser(allow_no_value=True)
+        self.config.read(config_path)
 
-    # Display available disks and select disk to install to
-    for i in range(len(disks)):
-        print("{}\t{}".format(disks[i], diskSizes[i]))
+        for header in CONFIG_HEADERS:
+            if not header in self.config.sections():
+                raise Exception("Header {} not found in config file".format(header))
 
-    valid = False
-    install_disk = ""
-    while not valid:
-        install_disk = input("Please select a disk to install to: ")
-        if install_disk in disks:
-            valid = True
-        else:
-            log("[!] Invalid disk selected, please try again")
-    return install_disk
+        for key in INSTALL_CONFIG_KEYS:
+            if not key in self.config["Install.Config"]:
+                raise Exception("Key {} missing from Install.Config section of config".format(key))
 
-# Creates 2 partitions, efi and LUKS encrypted
-def partition_disk_phys(disk, efi_size="512M"):
-    # Create physical disk partitions
-    if not os.path.exists(disk):
-        log("[!] Disk not found!")
-        exit()
+        # select_disk must be called before these values used
+        # Setting these as an empty string now just makes some checks simpler
+        self.config["Install.Config"]["install_disk"] = ""
+        self.config["Install.Config"]["efi_partition"] = ""
+        self.config["Install.Config"]["luks_partition"] = ""
 
-    log("[*] Clearing any existing partition table")
-    execute("sfdisk --delete {}".format(disk))
+    def select_disk(self):
+        """Prompt user to select installation disk""" 
+        proc = execute("lsblk -p")
+        result = proc.stdout
+        
+        # Create list of tuples (disk_path, disk_size)
+        disks = []
+        for line in result.splitlines():
+            line = line.split()
+            if line[TYPE_INDEX] == "disk":
+                disks.append((line[NAME_INDEX], line[SIZE_INDEX]))
 
-    log("[*] Creating efi and LUKS partitions")
-    cmd_input = SFDISK_PART.format(efi_size)
-    execute("sfdisk {}".format(disk), stdin=cmd_input)
+        # Display available disks and select disk to install to
+        for i in range(len(disks)): 
+            print("{}\t{}".format(disks[i][0], disks[i][1]))
 
-def encrypt_partition(partition, openas="cryptlvm"):
-    if not os.path.exists(partition):
-        log("[!] Partition not found!")
-        exit()
+        valid = False
+        install_disk = ""
+        while not valid:
+            install_disk = input("Please select a disk to install to: ")
+            for disk in disks:
+                if install_disk == disk[0]:
+                    valid = True
+                else:
+                    log("[!] Invalid disk selected, please try again")
+        
+        self.config["Install.Config"]["install_disk"] = install_disk
+    
+        # Assumption: install_disk + p1 is efi install_disk + p2 is luks
+        self.config["Install.Config"]["efi_partition"] = install_disk + "p1"
+        self.config["Install.Config"]["luks_partition"] = install_disk + "p2"
+    
+    def partition_disk_phys():
+        """Creates 2 partitions, efi and LUKS"""    
+        disk = self.config["Install.Config"]["install_disk"]
+    
+        if not os.path.exists(disk):
+            raise Exception("Disk not found - {}".format(disk))
 
-    log("[*] Encrpyting {}".format(partition))
-    execute("cryptsetup luksFormat --type luks1 {}".format(partition), interactive=True)  # Use luks1 for grub compatability
+        log("[*] Clearing any existing partition table")
+        execute("sfdisk --delete {}".format(disk))
 
-    if openas != "":
+        log("[*] Creating efi and LUKS partitions")
+        cmd_input = SFDISK_PART.format(self.config["Install.Config"]["efi_size"])
+        execute("sfdisk {}".format(disk), stdin=cmd_input)
+
+    def encrypt_luks_partition():
+        luks_partition = self.config["Install.Config"]["luks_partition"]
+        luks_name = self.config["Install.Config"]["luks_name"]
+
+        if not os.path.exists(luks_partition):
+            raise Exception("Partition not found - {}".format(luks_partition))
+        if luks_name == "":
+            raise Exception("Luks name not set")
+
+        log("[*] Encrpyting {}".format(luks_partition))
+        # Use luks1 for grub compatability
+        execute("cryptsetup luksFormat --type luks1 {}".format(luks_partition), interactive=True)
+
         log("[*] Opening LUKS container to partition with LVM")
-        execute("cryptsetup open {} {}".format(partition, openas), interactive=True)
+        execute("cryptsetup open {} {}".format(luks_partition, luks_name), interactive=True)
 
 def create_lvm_on_luks(luks="cryptlvm", vol_grp="vg0", swap_size="16G", root_size="128G"):
     log("[*] Creating LVM volumes")

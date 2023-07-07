@@ -38,10 +38,11 @@ polybar
 rofi
 vlc
 
-[Yay]
+[Yay.Pkgs]
 pulseaduio
 
 [Install.Config]
+efi_size = 512M
 luks_name = cryptlvm
 tz.region = Australia
 tz.city = Sydney
