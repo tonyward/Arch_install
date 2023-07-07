@@ -1,0 +1,49 @@
+[Pacman.Base]
+base
+base-devel
+linux
+linux-firmware
+lvm2
+grub
+efibootmgr
+
+[Pacman.Intel]
+intel-ucode
+
+[Pacman.Util]
+vim
+networkmanager
+git
+go
+man
+zsh
+pavucontrol
+
+[Pacman.Disp]
+i3-gaps
+lightdm
+lightdm-gtk-greeter
+xorg-server
+arandr
+picom
+feh
+
+[Pacman.User]
+firefox
+kitty
+neofetch
+imagemagick
+polybar
+rofi
+vlc
+
+[Yay]
+pulseaduio
+
+[Install.Config]
+luks_name = cryptlvm
+tz.region = Australia
+tz.city = Sydney
+hostname = lappy
+mount_path = /mnt
+sudo_user = c4tdog

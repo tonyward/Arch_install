@@ -1,0 +1,15 @@
+arandr
+feh
+firefox
+git
+imagemagick
+kitty
+lightdm
+neofetch
+pavucontrol
+picom
+polybar
+pulseaudio
+rofi
+vlc
+zsh
