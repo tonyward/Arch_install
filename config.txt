@@ -42,10 +42,16 @@ vlc
 pulseaduio
 
 [Install.Config]
+mount_path = /mnt
 efi_size = 512M
+swap_size = 16G
+root_size = 128G
 luks_name = cryptlvm
+volume_group = vg0 
+hostname = lappy
+sudo_user = c4tdog
 tz.region = Australia
 tz.city = Sydney
-hostname = lappy
-mount_path = /mnt
-sudo_user = c4tdog
+locale = en_US.UTF-8 UTF-8
+language = en_us.UTF-8
+enable_services = lightdm NetworkManager

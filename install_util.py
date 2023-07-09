@@ -34,34 +34,11 @@ def has_network(timeout=5):
         log("Connect to internet using: iwctl station <wlan> connect <SSID>")
         return False
 
-def parse_config(config_path):
-    if not os.path.isfile(config_path):
-        log("[!] No config file found - {}".format(config_path))
-        exit()
-
-    config_file = ConfigParser(allow_no_value=True)
-    config_file.read(config_path)
-    sections = config_file.sections() 
-    config_dict = {}
-
-    if not "Install.Config" in sections:
-        log("[!] No installation config in {}".format(config_path))
-        exit()
-
-    for setting in INSTALL_SETTINGS:
-        if setting not in config_file["Install.Config"]:
-            log("[!] Missing install setting {}".format(setting))
-            exit()
-        config_dict[setting] = config_file["Install.Config"][setting]
-    
-    if not "Pacman.Pkgs" in sections:
-        log("[!] No installation packages in {}".format(config_path))
-        exit()
-    config_dict["pacman_pkgs"] = " ".join([pkg for pkg in config_file["Pacman.Pkgs"]])
-
-    # TODO add yay package parsing
-
-    return config_dict
+def validate_file_paths(paths):
+    """Takes a list of file paths, checks they exist, throws an exception if not"""
+    for path in paths:
+        if not os.path.exists(path):
+            raise Exception("{} does not exist")
 
 def execute(cmd, stdin="", outfile="", chroot_dir="", interactive=False):
     if outfile != "" and interactive:

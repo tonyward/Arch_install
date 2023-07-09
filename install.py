@@ -27,8 +27,11 @@ import getpass
 # Constants for loading and validating install config
 CONF_FILE = "config.txt"
 CONFIG_HEADERS = {"Pacman.Pkgs", "Install.Config"}
-INSTALL_CONFIG_KEYS = {"luks_name", "tz.region", "tz.city", "hostname", 
-                       "mount_path", "sudo_user"}
+CONFIG_FILE_SETTINGS = {"mount_path" "efi_size", "swap_size", "root_size", "luks_name", 
+                        "volume_group", "hostname", "sudo_user", "tz.region", 
+                        "tz.city", "locale", "language", "enable_services"}
+CONFIG_RUNTIME_SETTINGS = {"install_disk", "partitions.phys.efi", "partitions.phys.luks",
+                           "partitions.lvm.swap", "partitions.lvm.root", "partitions.lvm.home"}
 
 # Positions of useful information from lsblk command
 # lsblk output: <NAME>  <MAJ:MIN>   <RM>    <SIZE>  <RO>    <TYPE>    <MOUNTPOINTS>
@@ -86,22 +89,25 @@ class Installer:
         if not os.path.isfile(config_path):
             raise Exception("{} does not exist".format(config_path))
 
-        self.config = ConfigParser(allow_no_value=True)
-        self.config.read(config_path)
+        config_file = ConfigParser(allow_no_value=True)
+        config_file.read(config_path)
 
         for header in CONFIG_HEADERS:
-            if not header in self.config.sections():
+            if not header in config_file.sections():
                 raise Exception("Header {} not found in config file".format(header))
 
-        for key in INSTALL_CONFIG_KEYS:
-            if not key in self.config["Install.Config"]:
+        self.pacman_pkgs = config_file["Pacman.Pkgs"]
+        self.config = config_file["Install.Config"]
+
+        # Contents of keys is not validated
+        for key in CONFIG_FILE_SETTINGS:
+            if not key in self.config:
                 raise Exception("Key {} missing from Install.Config section of config".format(key))
 
-        # select_disk must be called before these values used
-        # Setting these as an empty string now just makes some checks simpler
-        self.config["Install.Config"]["install_disk"] = ""
-        self.config["Install.Config"]["efi_partition"] = ""
-        self.config["Install.Config"]["luks_partition"] = ""
+        # Come configs must be set at runtime, rather than in config file
+        # Make them blank for now so methods don't have to check for keys
+        for key in CONFIG_RUNTIME_SETTINGS:
+            self.config[key] = ""
 
     def select_disk(self):
         """Prompt user to select installation disk""" 
@@ -129,15 +135,15 @@ class Installer:
                 else:
                     log("[!] Invalid disk selected, please try again")
         
-        self.config["Install.Config"]["install_disk"] = install_disk
+        self.config["install_disk"] = install_disk
     
         # Assumption: install_disk + p1 is efi install_disk + p2 is luks
-        self.config["Install.Config"]["efi_partition"] = install_disk + "p1"
-        self.config["Install.Config"]["luks_partition"] = install_disk + "p2"
+        self.config["partitions.phys.efi"] = install_disk + "p1"
+        self.config["partitions.phys.luks"] = install_disk + "p2"
     
-    def partition_disk_phys():
+    def partition_disk_phys(self):
         """Creates 2 partitions, efi and LUKS"""    
-        disk = self.config["Install.Config"]["install_disk"]
+        disk = self.config["install_disk"]
     
         if not os.path.exists(disk):
             raise Exception("Disk not found - {}".format(disk))
@@ -146,12 +152,13 @@ class Installer:
         execute("sfdisk --delete {}".format(disk))
 
         log("[*] Creating efi and LUKS partitions")
-        cmd_input = SFDISK_PART.format(self.config["Install.Config"]["efi_size"])
+        cmd_input = SFDISK_PART.format(self.config["efi_size"]) 
         execute("sfdisk {}".format(disk), stdin=cmd_input)
 
-    def encrypt_luks_partition():
-        luks_partition = self.config["Install.Config"]["luks_partition"]
-        luks_name = self.config["Install.Config"]["luks_name"]
+    def encrypt_luks_partition(self): 
+        """Encrypt LUKS partition using Luks1 for compatability with grub"""
+        luks_partition = self.config["paritions.phys.luks"]
+        luks_name = self.config["luks_name"]
 
         if not os.path.exists(luks_partition):
             raise Exception("Partition not found - {}".format(luks_partition))
@@ -165,121 +172,188 @@ class Installer:
         log("[*] Opening LUKS container to partition with LVM")
         execute("cryptsetup open {} {}".format(luks_partition, luks_name), interactive=True)
 
-def create_lvm_on_luks(luks="cryptlvm", vol_grp="vg0", swap_size="16G", root_size="128G"):
-    log("[*] Creating LVM volumes")
-    execute("pvcreate /dev/mapper/{}".format(luks))
-    execute("vgcreate {} /dev/mapper/{}".format(vol_grp, luks))
-    execute("lvcreate -L {} {} -n swap".format(swap_size, vol_grp))
-    execute("lvcreate -L {} {} -n root".format(root_size, vol_grp))
-    # home gets all space not used by swap or root
-    execute("lvcreate -l 100%FREE {} -n home".format(vol_grp))
+    def create_lvm_partitions(self):
+        """Creates LVM partitions, requires an open LUKS container"""
+        swap_size = self.config["swap_size"]
+        root_size = self.config["root_size"]
+        vol_grp   = self.config["volume_group"]
+        luks_path = "/dev/mapper/{}".format(self.config["luks_name"])
 
-def format_partitions(partitions):
-    log("[*] Formatting partitions")
-    if not has_part_paths(partitions):
-        exit()
+        if not os.path.exists(luks_path):
+            raise Exception("{} does not exist".format(luks_path))
 
-    execute("mkfs.ext4 {}".format(partitions["root"]))
-    execute("mkfs.ext4 {}".format(partitions["home"]))
-    execute("mkswap {}".format(partitions["swap"]))
-    execute("mkfs.fat -F32 {}".format(partitions["efi"]))
+        log("[*] Creating LVM volumes")
+        execute("pvcreate {}".format(luks_path))
+        execute("vgcreate {} {}".format(vol_grp, luks_path))
+        execute("lvcreate -L {} {} -n swap".format(swap_size, vol_grp))
+        execute("lvcreate -L {} {} -n root".format(root_size, vol_grp))
+        # home gets all space not used by swap or root
+        execute("lvcreate -l 100%FREE {} -n home".format(vol_grp))
 
-def mount_partitions(partitions, mnt_pnt="/mnt"):
-    log("[*] Mounting partitions")
-    if not has_part_paths(partitions):
-        exit()
+    def format_partitions(self):
+        """Format efi, home, and root. mkswap swap"""
+        efi = self.config["partitions.phys.efi"]
+        root = self.config["partitions.lvm.root"]
+        home = self.config["partitions.lvm.home"]
+        swap = self.config["partitions.lvm.swap"]
+
+        try:
+            validate_file_paths([efi, root, home, swap])
+        except Exception as e:
+            raise e
+
+        log("[*] Formatting partitions")
+
+        execute("mkfs.ext4 {}".format(root))
+        execute("mkfs.ext4 {}".format(home))
+        execute("mkswap {}".format(swap))
+        execute("mkfs.fat -F32 {}".format(efi))
+
+    def mount_partitions(self):
+        """Mount efi, home, and root. swapon swap"""
+        mnt_path = self.config["mount_path"]
+        efi = self.config["partitions.phys.efi"]
+        root = self.config["partitions.lvm.root"]
+        home = self.config["partitions.lvm.home"]
+        swap = self.config["partitions.lvm.swap"]
+
+        try:
+            validate_file_paths(efi, root, home, swap)
+        except Exception as e:
+            raise e
+
+        log("[*] Mounting partitions")
     
-    execute("mount {} {}".format(partitions["root"], mnt_pnt))
-    execute("mkdir {}/efi".format(mnt_pnt))
-    execute("mkdir {}/home".format(mnt_pnt))
-    execute("mount {} {}/efi".format(partitions["efi"], mnt_pnt))
-    execute("mount {} {}/home".format(partitions["home"], mnt_pnt))
-    execute("swapon {}".format(partitions["swap"]))
+        execute("mount {} {}".format(root, mnt_path))
+        execute("mkdir {}/efi".format(mnt_path))
+        execute("mkdir {}/home".format(mnt_path))
+        execute("mount {} {}/efi".format(efi, mnt_path))
+        execute("mount {} {}/home".format(home, mnt_path))
+        execute("swapon {}".format(swap))
 
-# Checks that partitions contains a path for root, home, swap and efi
-def has_part_paths(partitions):
-    for part in ["root", "home", "swap", "efi"]:
-        if part not in partitions:
-            log("[!] Path not provided for all partitions")
-            return False
-    return True
+    def pacstrap(self):
+        """Install arch linux and any specified packages (Pacman not AUR)"""
+        mnt_path = self.config["mount_path"]
+        packages = self.pacman_pkgs
+        log("[*] Running pacstrap to install base system")
+        execute("pacstrap {} {}".format(mnt_path, packages), interactive=True)
+ 
+    def conf_fstab(self):
+        """Creates fstab on new install"""
+        mnt_path = self.config["mount_path"]
+        fstab_file = "{}/etc/fstab".format(mnt_path)
+        log("[*] Configuring fstab")
+        execute("genfstab -U {}".format(mnt_path), outfile=fstab_file)
+ 
+    def conf_tz(self):
+        """Links specified timzone file to /etc/localtime"""
+        mnt_path = self.config["mount_path"]
+        region = self.config["tz.region"]
+        city = self.config["tz.city"]
 
-def pacstrap(packages, mnt_path="/mnt"):
-    log("[*] Running pacstrap to install base system")
-    execute("pacstrap {} {}".format(mnt_path, packages), interactive=True)
+        tz_file = "{}/usr/share/zoneinfo/{}/{}".format(mnt_path, region, city)
+        localtime_file = "{}/etc/localtime".format(mnt_path)
 
-def conf_fstab(mnt_path="/mnt"):
-    log("[*] Configuring fstab")
-    execute("genfstab -U {}".format(mnt_path), outfile="{}/etc/fstab".format(mnt_path))
+        log("[*] Setting timezone")
+        execute("ln -sf {} {}".format(tz_file, localtime_file))
+ 
+    # TODO I think this is missing something, check arch install
+    def conf_locale(self):
+        """Creates /etc/locale.gen and /etc/locale.conf"""
+        mny_path = self.config["mount_path"]
+        locale = self.config["locale"]
+        lang = "LANG={}".format(self.config["language"])
 
-def conf_tz(region="Australia", city="Sydney", mnt_path="/mnt"):
-    log("[*] Setting timezone")
-    execute("ln -sf {}/usr/share/zoneinfo/{}/{} {}/etc/localtime".format(mnt_path, region, city, mnt_path))
+        log("[*] Configuring localization settings")
+        write_file(locale, "{}/etc/locale.gen".format(mnt_path))
+        write_file(lang, "{}/etc/locale.conf".format(mnt_path))
 
-def conf_locale(locale="en_US.UTF-8 UTF-8", lang="LANG=en_US.UTF-8", mnt_path="/mnt"):
-    log("[*] Configuring localization settings")
-    write_file(locale, "{}/etc/locale.gen".format(mnt_path))
-    write_file(lang, "{}/etc/locale.conf".format(mnt_path))
+    def conf_network(self):
+        """Creates /etc/hosts and /etc/hostname using provided hostname"""
+        mnt_path = self.config["mount_path"]
+        hostname = self.config["hostname"]
 
-def conf_network(hostname="lappy", mnt_path="/mnt"):
-    log("[*] Configuring network hosts")
-    write_file(hostname, "{}/etc/hostname".format(mnt_path))
-    hosts = "127.0.0.1\tlocalhost\n127.0.0.1\t{}".format(hostname)
-    write_file(hosts, "{}/etc/hosts".format(mnt_path))
+        log("[*] Configuring network hosts")
+        write_file(hostname, "{}/etc/hostname".format(mnt_path))
+        hosts = "127.0.0.1\tlocalhost\n127.0.0.1\t{}".format(hostname)
+        write_file(hosts, "{}/etc/hosts".format(mnt_path))
 
-def conf_users(sudo_user="c4tdog", mnt_path="/mnt"):
-    log("[*] Configuring users")
-    log("[+] Set root password")
-    execute("passwd root", chroot_dir=mnt_path, interactive=True)
+    def conf_users():
+        """Prompts for root password, edits sudoers file, creates sudo user"""
+        mnt_path = self.config["mount_path"]
+        sudo_user = self.config["sudo_user"]
 
-    log("[+] Creating sudo user")
-    execute("useradd -mG wheel {}".format(sudo_user), chroot_dir=mnt_path)
-    execute("passwd {}".format(sudo_user), chroot_dir=mnt_path)
-    sudoers = "root ALL=(ALL:ALL) ALL\n" + "%wheel ALL=(ALL:ALL) ALL\n" + "@includedir /etc/sudoers.d"
-    write_file(sudoers, "{}/etc/sudoers".format(mnt_path))
+        log("[*] Configuring users")
+        log("[+] Set root password")
+        execute("passwd root", chroot_dir=mnt_path, interactive=True)
 
-def install_grub(luks_partition, luks_name="cryptlvm", mnt_path="/mnt"):
-    log ("[*] Creating grub encryption key")
-    key_path = "{}/root/{}.keyfile".format(mnt_path, luks_name)
-    print(key_path)
-    execute("dd bs=512 count=4 if=/dev/random of={} iflag=fullblock".format(key_path))
-    execute("chmod 000 {}".format(key_path))
-    execute("cryptsetup -v luksAddKey {} {}".format(luks_partition, key_path), interactive=True)
+        log("[+] Creating sudo user")
+        execute("useradd -mG wheel {}".format(sudo_user), chroot_dir=mnt_path)
+        execute("passwd {}".format(sudo_user), chroot_dir=mnt_path)
+        sudoers = "root ALL=(ALL:ALL) ALL\n" + "%wheel ALL=(ALL:ALL) ALL\n" + "@includedir /etc/sudoers.d"
+        write_file(sudoers, "{}/etc/sudoers".format(mnt_path))
+
+    def install_grub(self):
+        """
+        Creates master encryption key foor grub to boot with
+        Edits required config files (/etc/mkinitcpio.conf, /etc/default/grub)
+        Creates initram image, and installs and configures grub
+        """
+        mnt_path = self.config["mount_path"]
+        luks_name = self.config["luks_name"]
+        luks_patition = self.config["partitions.phys.luks"]
+
+        log ("[*] Creating grub encryption key")
+        key_path = "{}/root/{}.keyfile".format(mnt_path, luks_name)
+        print(key_path)
+        execute("dd bs=512 count=4 if=/dev/random of={} iflag=fullblock".format(key_path))
+        execute("chmod 000 {}".format(key_path))
+        execute("cryptsetup -v luksAddKey {} {}".format(luks_partition, key_path), interactive=True)
     
-    log("[*] Configuring intram with encrypted boot")
-    initram = "{}\nFILES=(/root/{}.keyfile)".format(INITRAM_HOOKS, luks_name)
-    write_file(initram, "{}/etc/mkinitcpio.conf".format(mnt_path))
-    execute("mkinitcpio -P", chroot_dir=mnt_path)
-    execute("chmod 600 {}/boot/initramfs-linux*".format(mnt_path))
+        log("[*] Configuring intram with encrypted boot")
+        initram = "{}\nFILES=(/root/{}.keyfile)".format(INITRAM_HOOKS, luks_name)
+        write_file(initram, "{}/etc/mkinitcpio.conf".format(mnt_path))
+        execute("mkinitcpio -P", chroot_dir=mnt_path)
+        execute("chmod 600 {}/boot/initramfs-linux*".format(mnt_path))
 
-    log("[*] Installing grub")
-    grub_file = "{}/etc/default/grub".format(mnt_path)
-    grub_cmdline = "GRUB_CMDLINE_LINUX=\"cryptdevice={}:{} cryptkey=rootfs:/root/{}.keyfile\"\n".format(luks_partition, luks_name, luks_name)
-    grub_crypt = "GRUB_ENABLE_CRYPTODISK=y\n"
-    replace_in_file(".*GRUB_CMDLINE_LINUX=.*", grub_cmdline, grub_file)
-    replace_in_file(".*GRUB_ENABLE_CRYPTODISK.*", grub_crypt, grub_file)
-    execute("grub-install --target=x86_64-efi --efi-directory=/efi --bootloader-id=GRUB", chroot_dir=mnt_path)
-    execute("grub-mkconfig -o /boot/grub/grub.cfg", chroot_dir=mnt_path)
+        log("[*] Installing grub")
+        grub_file = "{}/etc/default/grub".format(mnt_path)
+        grub_cmdline = "GRUB_CMDLINE_LINUX=\"cryptdevice={}:{} cryptkey=rootfs:/root/{}.keyfile\"\n".format(luks_partition, luks_name, luks_name)
+        grub_crypt = "GRUB_ENABLE_CRYPTODISK=y\n"
+        replace_in_file(".*GRUB_CMDLINE_LINUX=.*", grub_cmdline, grub_file)
+        replace_in_file(".*GRUB_ENABLE_CRYPTODISK.*", grub_crypt, grub_file)
+        execute("grub-install --target=x86_64-efi --efi-directory=/efi --bootloader-id=GRUB", chroot_dir=mnt_path)
+        execute("grub-mkconfig -o /boot/grub/grub.cfg", chroot_dir=mnt_path)
 
-def enable_services(services={"lightdm", "NetworkManager"}, mnt_path="/mnt"):
-    log("[*] Enabling services")
-    for serv in services:
-        execute("systemctl enable {}".format(serv), chroot_dir=mnt_path)
+    def enable_services(self):
+        """Enables all required services"""
+        mnt_path = self.config["mount_path"]
+        services = self.config["enable_services"].split()
 
-# Use of arch-chroot is hacky and inconsistent :(
-def install_yay(mnt_path="/mnt", sudo_user="c4tdog"):
-    # makepkg must be run as non-root user and from dir of pkg being installed
-    yay_dir = "/home/{}/yay".format(sudo_user)
+        log("[*] Enabling services")
+        for serv in services:
+            execute("systemctl enable {}".format(serv), chroot_dir=mnt_path)
 
-    su = "su {}".format(sudo_user)
-    clone_repo = "git clone {} {}".format(YAY_REPO, yay_dir)
-    build_yay = "cd {}; makepkg -si --noconfirm".format(yay_dir)
+    # Use of arch-chroot is hacky and inconsistent :(
+    def install_yay(self):
+        """Clones yay from AUR and installs on guest system"""
+        mnt_path = self.config["mount_path"]
+        sudo_user = self.config["sudo_user"]
 
-    execute(su, stdin=clone_repo, chroot_dir=mnt_path)
-    execute(su, stdin=build_yay, chroot_dir=mnt_path, interactive=True)
+        # makepkg must be run as non-root user and from dir of pkg being installed
+        yay_dir = "/home/{}/yay".format(sudo_user)
 
-def configure():
-    return
+
+        su = "su {}".format(sudo_user)
+        clone_repo = "git clone {} {}".format(YAY_REPO, yay_dir)
+        build_yay = "cd {}; makepkg -si --noconfirm".format(yay_dir)
+
+        execute(su, stdin=clone_repo, chroot_dir=mnt_path)
+        execute(su, stdin=build_yay, chroot_dir=mnt_path, interactive=True)
+
+    def configure():
+        """Unimplemented"""
+        return
 
 if __name__ == "__main__":
     main()
