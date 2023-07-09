@@ -38,7 +38,7 @@ def validate_file_paths(paths):
     """Takes a list of file paths, checks they exist, throws an exception if not"""
     for path in paths:
         if not os.path.exists(path):
-            raise Exception("{} does not exist")
+            raise Exception("{} does not exist".format(path))
 
 def execute(cmd, stdin="", outfile="", chroot_dir="", interactive=False):
     if outfile != "" and interactive:

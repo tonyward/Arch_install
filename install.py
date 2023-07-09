@@ -27,7 +27,7 @@ import getpass
 # Constants for loading and validating install config
 CONF_FILE = "config.txt"
 CONFIG_HEADERS = {"Pacman.Pkgs", "Install.Config"}
-CONFIG_FILE_SETTINGS = {"mount_path" "efi_size", "swap_size", "root_size", "luks_name", 
+CONFIG_FILE_SETTINGS = {"mount_path", "efi_size", "swap_size", "root_size", "luks_name", 
                         "volume_group", "hostname", "sudo_user", "tz.region", 
                         "tz.city", "locale", "language", "enable_services"}
 CONFIG_RUNTIME_SETTINGS = {"install_disk", "partitions.phys.efi", "partitions.phys.luks",
@@ -54,33 +54,12 @@ def main():
         exit()
     time.sleep(1)
     
-    config = parse_config(CONF_FILE)
+    try:
+        installer = Installer(CONF_FILE)
+        installer.full_install()
+    except Exception as e:
+        log("[!] {}".format(e))
 
-    install_disk = select_disk() 
-
-    partition_disk_phys(install_disk)
-    # Slight assumption, first volume made is <disk>+p1, second is <disk>+p2
-    efi_partition = install_disk + "p1"
-    luks_partition = install_disk + "p2"
-
-    encrypt_partition(luks_partition)
-    
-    create_lvm_on_luks()
-    
-    partitions = {"root": "/dev/vg0/root", "home": "/dev/vg0/home", 
-                  "swap": "/dev/vg0/swap", "efi": efi_partition}
-    format_partitions(partitions)
-    mount_partitions(partitions)
-
-    pacstrap(config["pacman_pkgs"])
-    
-    conf_fstab()
-    conf_tz()
-    conf_locale()
-    conf_network()
-    conf_users()
-    install_grub(luks_partition)
-    enable_services()
 
 class Installer:
     """Holds installation config and executes discrete installation steps"""
@@ -109,6 +88,26 @@ class Installer:
         for key in CONFIG_RUNTIME_SETTINGS:
             self.config[key] = ""
 
+    def full_install(self):
+        try:
+            self.select_disk()
+            self.partition_disk_phys()
+            self.encrypt_luks_partition()
+            self.create_lvm_partitions()
+            self.format_partitions()
+            self.mount_partitions()
+            self.pacstrap()
+            self.conf_fstab()
+            self.conf_tz()
+            self.conf_locale()
+            self.conf_network()
+            self.conf_users()
+            self.install_grub()
+            self.enable_services()
+            self.install_yay()
+        except Exception as e:
+            raise e
+
     def select_disk(self):
         """Prompt user to select installation disk""" 
         proc = execute("lsblk -p")
@@ -132,8 +131,9 @@ class Installer:
             for disk in disks:
                 if install_disk == disk[0]:
                     valid = True
-                else:
-                    log("[!] Invalid disk selected, please try again")
+            
+            if not valid:
+                log("[!] Invalid disk selected, please try again")
         
         self.config["install_disk"] = install_disk
     
@@ -157,7 +157,7 @@ class Installer:
 
     def encrypt_luks_partition(self): 
         """Encrypt LUKS partition using Luks1 for compatability with grub"""
-        luks_partition = self.config["paritions.phys.luks"]
+        luks_partition = self.config["partitions.phys.luks"]
         luks_name = self.config["luks_name"]
 
         if not os.path.exists(luks_partition):
@@ -190,6 +190,10 @@ class Installer:
         # home gets all space not used by swap or root
         execute("lvcreate -l 100%FREE {} -n home".format(vol_grp))
 
+        self.config["partitions.lvm.root"] = "/dev/{}/root".format(vol_grp)
+        self.config["partitions.lvm.home"] = "/dev/{}/home".format(vol_grp)
+        self.config["partitions.lvm.swap"] = "/dev/{}/swap".format(vol_grp)
+        
     def format_partitions(self):
         """Format efi, home, and root. mkswap swap"""
         efi = self.config["partitions.phys.efi"]
@@ -218,7 +222,7 @@ class Installer:
         swap = self.config["partitions.lvm.swap"]
 
         try:
-            validate_file_paths(efi, root, home, swap)
+            validate_file_paths([efi, root, home, swap])
         except Exception as e:
             raise e
 
