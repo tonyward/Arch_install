@@ -76,6 +76,7 @@ class Installer:
                 raise Exception("Header {} not found in config file".format(header))
 
         self.pacman_pkgs = config_file["Pacman.Pkgs"]
+        self.yay_pkgs = config_file["Yay.Pkgs"]
         self.config = config_file["Install.Config"]
 
         # Contents of keys is not validated
@@ -105,6 +106,7 @@ class Installer:
             self.install_grub()
             self.enable_services()
             self.install_yay()
+            self.install_yay_pkgs()
         except Exception as e:
             raise e
 
@@ -347,13 +349,24 @@ class Installer:
         # makepkg must be run as non-root user and from dir of pkg being installed
         yay_dir = "/home/{}/yay".format(sudo_user)
 
-
         su = "su {}".format(sudo_user)
         clone_repo = "git clone {} {}".format(YAY_REPO, yay_dir)
         build_yay = "cd {}; makepkg -si --noconfirm".format(yay_dir)
 
         execute(su, stdin=clone_repo, chroot_dir=mnt_path)
         execute(su, stdin=build_yay, chroot_dir=mnt_path, interactive=True)
+
+    def install_yay_pkgs(self):
+        """Installs packages using yay"""
+        mnt_path =self.config["mount_path"]
+        sudo_user = self.config["sudo_user"]
+        yay_pkgs = self.yay_pkgs
+
+        # yay cannot be run as root
+        su = "su {}".format(sudo)user)
+        yay_cmd = "yay -Sy --noconfirm"
+
+        execute(su, stdin=yay_cmd, chroot_dir=mnt_path, interactive=True)
 
     def configure():
         """Unimplemented"""
