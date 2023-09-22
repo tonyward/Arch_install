@@ -263,7 +263,6 @@ class Installer:
         log("[*] Setting timezone")
         execute("ln -sf {} {}".format(tz_file, localtime_file))
  
-    # TODO I think this is missing something, check arch install
     def conf_locale(self):
         """Creates /etc/locale.gen and /etc/locale.conf"""
         mnt_path = self.config["mount_path"]
@@ -273,6 +272,7 @@ class Installer:
         log("[*] Configuring localization settings")
         write_file(locale, "{}/etc/locale.gen".format(mnt_path))
         write_file(lang, "{}/etc/locale.conf".format(mnt_path))
+        execute("locale-gen", chroot_dir=mnt_path)
 
     def conf_network(self):
         """Creates /etc/hosts and /etc/hostname using provided hostname"""
