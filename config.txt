@@ -37,6 +37,7 @@ imagemagick
 polybar
 rofi
 vlc
+rofi
 
 [Yay.Pkgs]
 pulseaduio
