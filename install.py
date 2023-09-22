@@ -75,8 +75,8 @@ class Installer:
             if not header in config_file.sections():
                 raise Exception("Header {} not found in config file".format(header))
 
-        self.pacman_pkgs = config_file["Pacman.Pkgs"]
-        self.yay_pkgs = config_file["Yay.Pkgs"]
+        self.pacman_pkgs = " ".join([pkg for pkg in config_file["Pacman.Pkgs"]])
+        self.yay_pkgs = " ".join([pkg for pkg in config_file["Yay.Pkgs"]])
         self.config = config_file["Install.Config"]
 
         # Contents of keys is not validated
@@ -266,7 +266,7 @@ class Installer:
     # TODO I think this is missing something, check arch install
     def conf_locale(self):
         """Creates /etc/locale.gen and /etc/locale.conf"""
-        mny_path = self.config["mount_path"]
+        mnt_path = self.config["mount_path"]
         locale = self.config["locale"]
         lang = "LANG={}".format(self.config["language"])
 
@@ -284,7 +284,7 @@ class Installer:
         hosts = "127.0.0.1\tlocalhost\n127.0.0.1\t{}".format(hostname)
         write_file(hosts, "{}/etc/hosts".format(mnt_path))
 
-    def conf_users():
+    def conf_users(self):
         """Prompts for root password, edits sudoers file, creates sudo user"""
         mnt_path = self.config["mount_path"]
         sudo_user = self.config["sudo_user"]
@@ -307,7 +307,8 @@ class Installer:
         """
         mnt_path = self.config["mount_path"]
         luks_name = self.config["luks_name"]
-        luks_patition = self.config["partitions.phys.luks"]
+        luks_partition = self.config["partitions.phys.luks"]
+        initram_hooks = self.config["initram_hooks"]
 
         log ("[*] Creating grub encryption key")
         key_path = "{}/root/{}.keyfile".format(mnt_path, luks_name)
@@ -317,7 +318,7 @@ class Installer:
         execute("cryptsetup -v luksAddKey {} {}".format(luks_partition, key_path), interactive=True)
     
         log("[*] Configuring intram with encrypted boot")
-        initram = "{}\nFILES=(/root/{}.keyfile)".format(INITRAM_HOOKS, luks_name)
+        initram = "{}\nFILES=(/root/{}.keyfile)".format(initram_hooks, luks_name)
         write_file(initram, "{}/etc/mkinitcpio.conf".format(mnt_path))
         execute("mkinitcpio -P", chroot_dir=mnt_path)
         execute("chmod 600 {}/boot/initramfs-linux*".format(mnt_path))
@@ -363,7 +364,7 @@ class Installer:
         yay_pkgs = self.yay_pkgs
 
         # yay cannot be run as root
-        su = "su {}".format(sudo)user)
+        su = "su {}".format(sudo_user)
         yay_cmd = "yay -Sy --noconfirm"
 
         execute(su, stdin=yay_cmd, chroot_dir=mnt_path, interactive=True)
