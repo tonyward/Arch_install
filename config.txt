@@ -54,6 +54,6 @@ sudo_user = c4tdog
 tz.region = Australia
 tz.city = Sydney
 locale = en_US.UTF-8 UTF-8
-language = en_us.UTF-8
+language = en_US.UTF-8
 enable_services = lightdm NetworkManager
 initram_hooks = HOOKS=(base udev autodetect keyboard keymap consolefont modconf block encrypt lvm2 filesystems fsck)
