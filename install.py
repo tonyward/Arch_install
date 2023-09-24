@@ -108,6 +108,7 @@ class Installer:
             self.enable_services()
             self.install_yay()
             self.install_yay_pkgs()
+            self.install_ohmyzsh()
             self.configure()
         except Exception as e:
             raise e
@@ -271,7 +272,7 @@ class Installer:
         locale = self.config["locale"]
         lang = "LANG={}".format(self.config["language"])
 
-        log("[*] Configuring localization settings")
+        log("[*] Generating locale")
         write_file(locale, "{}/etc/locale.gen".format(mnt_path))
         write_file(lang, "{}/etc/locale.conf".format(mnt_path))
         execute("locale-gen", chroot_dir=mnt_path)
@@ -356,6 +357,7 @@ class Installer:
         clone_repo = "git clone {} {}".format(YAY_REPO, yay_dir)
         build_yay = "cd {}; makepkg -si --noconfirm".format(yay_dir)
 
+        log("[*] Cloning and installing yay")
         execute(su, stdin=clone_repo, chroot_dir=mnt_path)
         execute(su, stdin=build_yay, chroot_dir=mnt_path, interactive=True)
 
@@ -369,6 +371,7 @@ class Installer:
         su = "su {}".format(sudo_user)
         yay_cmd = "yay -Sy --noconfirm"
 
+        log("[*] Installing yay packages")
         execute(su, stdin=yay_cmd, chroot_dir=mnt_path, interactive=True)
 
     def install_ohmyzsh(self):
@@ -377,9 +380,11 @@ class Installer:
         sudo_user = self.config["sudo_user"]
 
         # su to sudoer and run ohmyzsh install cmd (I prefer this install method to package manager)
-        cmd = "su {} {}".format(sudo_user, self.config["ohmyzsh_install_cmd"]
+        su = "su {}".format(sudo_user)
+        cmd = self.config["ohmyzsh_install_cmd"]
 
-        execute(cmd, chroot_dir=mnt_path)
+        log("[*] Installing ohmyzsh")
+        execute(su, stdin=cmd, chroot_dir=mnt_path, interactive=True)
 
     def configure(self):
         """Clone dotfiles and configure user settings"""
@@ -392,11 +397,15 @@ class Installer:
 
         # set user to sudoer so file permissions are correct
         # then clone dotfiles repo, and run configure script
-        clone_cmd = "su {} git clone {} {}".format(sudo_user, dotfiles_repo, dotfiles_dir)
-        config_cmd = "su {} python {}/configure.py".format(sudo_user, dotfile_dir)
+        su = "su {}".format(sudo_user)
+        clone_cmd = "git clone {} {}".format(dotfiles_repo, dotfiles_dir)
+        # Must be run from dotfiles directory
+        config_cmd = "cd {}; python configure.py".format(dotfiles_dir)
 
-        execute(clone_cmd, chroot_dir=mnt_path)
-        execute(config_cmd, chroot_dir=mnt_path)
+        log("[*] Cloning dotfiles")
+        execute(su, stdin=clone_cmd, chroot_dir=mnt_path, interactive=True)
+        log("[*] Running dotfiles config script")
+        execute(su, stdin=config_cmd, chroot_dir=mnt_path, interactive=True)
 
 if __name__ == "__main__":
     main()
