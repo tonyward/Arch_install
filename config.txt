@@ -37,7 +37,6 @@ imagemagick
 polybar
 rofi
 vlc
-rofi
 
 [Yay.Pkgs]
 pulseaduio
@@ -57,3 +56,5 @@ locale = en_US.UTF-8 UTF-8
 language = en_US.UTF-8
 enable_services = lightdm NetworkManager
 initram_hooks = HOOKS=(base udev autodetect keyboard keymap consolefont modconf block encrypt lvm2 filesystems fsck)
+ohmyzsh_install_cmd = sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+dotfiles_repo = https://github.com/tonyward/dotfiles

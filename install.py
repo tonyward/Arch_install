@@ -28,8 +28,9 @@ import getpass
 CONF_FILE = "config.txt"
 CONFIG_HEADERS = {"Pacman.Pkgs", "Install.Config"}
 CONFIG_FILE_SETTINGS = {"mount_path", "efi_size", "swap_size", "root_size", "luks_name", 
-                        "volume_group", "hostname", "sudo_user", "tz.region", 
-                        "tz.city", "locale", "language", "enable_services"}
+                        "volume_group", "hostname", "sudo_user", "tz.region", "tz.city",
+                        "locale", "language", "enable_services", "initram_hooks", 
+                        "ohmyzsh_install_cmd", "dotfiles_repo"}
 CONFIG_RUNTIME_SETTINGS = {"install_disk", "partitions.phys.efi", "partitions.phys.luks",
                            "partitions.lvm.swap", "partitions.lvm.root", "partitions.lvm.home"}
 
@@ -107,6 +108,7 @@ class Installer:
             self.enable_services()
             self.install_yay()
             self.install_yay_pkgs()
+            self.configure()
         except Exception as e:
             raise e
 
@@ -369,11 +371,32 @@ class Installer:
 
         execute(su, stdin=yay_cmd, chroot_dir=mnt_path, interactive=True)
 
-    def configure():
-        """Unimplemented"""
-        return
+    def install_ohmyzsh(self):
+        """Install ohmyzsh, for terminal themes and prettiness"""
+        mnt_path = self.config["mount_path"]
+        sudo_user = self.config["sudo_user"]
+
+        # su to sudoer and run ohmyzsh install cmd (I prefer this install method to package manager)
+        cmd = "su {} {}".format(sudo_user, self.config["ohmyzsh_install_cmd"]
+
+        execute(cmd, chroot_dir=mnt_path)
+
+    def configure(self):
+        """Clone dotfiles and configure user settings"""
+        mnt_path = self.config["mount_path"]
+        sudo_user = self.config["sudo_user"]
+        dotfiles_repo = self.config["dotfiles_repo"]
+
+        # dotfiles are stored in sudo users home directory
+        dotfiles_dir = "/home/{}/.dotfiles".format(sudo_user)
+
+        # set user to sudoer so file permissions are correct
+        # then clone dotfiles repo, and run configure script
+        clone_cmd = "su {} git clone {} {}".format(sudo_user, dotfiles_repo, dotfiles_dir)
+        config_cmd = "su {} python {}/configure.py".format(sudo_user, dotfile_dir)
+
+        execute(clone_cmd, chroot_dir=mnt_path)
+        execute(config_cmd, chroot_dir=mnt_path)
 
 if __name__ == "__main__":
     main()
-
-
