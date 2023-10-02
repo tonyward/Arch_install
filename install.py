@@ -269,8 +269,8 @@ class Installer:
     def conf_locale(self):
         """Creates /etc/locale.gen and /etc/locale.conf"""
         mnt_path = self.config["mount_path"]
-        locale = self.config["locale"]
-        lang = "LANG={}".format(self.config["language"])
+        locale = self.config["locale"] + '\n'
+        lang = "LANG={}".format(self.config["language"]) + '\n'
 
         log("[*] Generating locale")
         write_file(locale, "{}/etc/locale.gen".format(mnt_path))
